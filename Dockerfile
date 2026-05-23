@@ -1,36 +1,50 @@
-# Stage 1 - Build Frontend (Vite)
-FROM node:18 AS frontend
+# ---------- Frontend Build ----------
+FROM node:20 AS frontend
+
 WORKDIR /app
+
 COPY package*.json ./
+
 RUN npm install
+
 COPY . .
+
 RUN npm run build
 
-# Stage 2 - Backend (Laravel + PHP + Composer)
-FROM php:8.2-fpm AS backend
+# ---------- Backend ----------
+FROM php:8.3-apache
 
-# Install system dependencies
+WORKDIR /var/www/html
+
+# Install system packages
 RUN apt-get update && apt-get install -y \
-    git curl unzip libpq-dev libonig-dev libzip-dev zip \
-    && docker-php-ext-install pdo pdo_mysql mbstring zip
+    git \
+    unzip \
+    zip \
+    curl \
+    libzip-dev
+
+# Install PHP extensions
+RUN docker-php-ext-install pdo pdo_mysql zip
+
+# Enable apache rewrite
+RUN a2enmod rewrite
 
 # Install Composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-WORKDIR /var/www
-
-# Copy app files
+# Copy Laravel app
 COPY . .
 
-# Copy built frontend from Stage 1
-COPY --from=frontend /app/public/dist ./public/dist
+# Copy built Vite assets
+COPY --from=frontend /app/public/build ./public/build
 
-# Install PHP dependencies
+# Install Laravel dependencies
 RUN composer install --no-dev --optimize-autoloader
 
-# Laravel setup
-RUN php artisan config:clear && \
-    php artisan route:clear && \
-    php artisan view:clear
+# Permissions
+RUN chown -R www-data:www-data storage bootstrap/cache
 
-CMD ["php-fpm"]
+EXPOSE 80
+
+CMD ["apache2-foreground"]
