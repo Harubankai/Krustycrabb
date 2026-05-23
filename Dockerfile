@@ -1,4 +1,4 @@
-# ---------- Frontend Build ----------
+# ---------- Frontend ----------
 FROM node:20 AS frontend
 
 WORKDIR /app
@@ -16,33 +16,35 @@ FROM php:8.3-apache
 
 WORKDIR /var/www/html
 
-# Install system packages
 RUN apt-get update && apt-get install -y \
-    git \
-    unzip \
-    zip \
-    curl \
-    libzip-dev
+    git unzip zip curl libzip-dev
 
-# Install PHP extensions
 RUN docker-php-ext-install pdo pdo_mysql zip
 
-# Enable apache rewrite
 RUN a2enmod rewrite
 
-# Install Composer
+# Laravel public folder
+ENV APACHE_DOCUMENT_ROOT /var/www/html/public
+
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
+    /etc/apache2/sites-available/*.conf
+
+RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' \
+    /etc/apache2/apache2.conf \
+    /etc/apache2/conf-available/*.conf
+
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Copy Laravel app
 COPY . .
 
-# Copy built Vite assets
 COPY --from=frontend /app/public/build ./public/build
 
-# Install Laravel dependencies
 RUN composer install --no-dev --optimize-autoloader
 
-# Permissions
+RUN php artisan config:cache
+RUN php artisan route:cache
+RUN php artisan view:cache
+
 RUN chown -R www-data:www-data storage bootstrap/cache
 
 EXPOSE 80
