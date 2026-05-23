@@ -1,52 +1,36 @@
-# ---------- Frontend ----------
-FROM node:20 AS frontend
-
+# Stage 1 - Build Frontend (Vite)
+FROM node:18 AS frontend
 WORKDIR /app
-
 COPY package*.json ./
-
 RUN npm install
-
 COPY . .
-
 RUN npm run build
 
-# ---------- Backend ----------
-FROM php:8.3-apache
+# Stage 2 - Backend (Laravel + PHP + Composer)
+FROM php:8.2-fpm AS backend
 
-WORKDIR /var/www/html
-
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-    git unzip zip curl libzip-dev
+    git curl unzip libpq-dev libonig-dev libzip-dev zip \
+    && docker-php-ext-install pdo pdo_mysql mbstring zip
 
-RUN docker-php-ext-install pdo pdo_mysql zip
+# Install Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-RUN a2enmod rewrite
+WORKDIR /var/www
 
-# Laravel public folder
-ENV APACHE_DOCUMENT_ROOT /var/www/html/public
-
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
-    /etc/apache2/sites-available/*.conf
-
-RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' \
-    /etc/apache2/apache2.conf \
-    /etc/apache2/conf-available/*.conf
-
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
-
+# Copy app files
 COPY . .
 
-COPY --from=frontend /app/public/build ./public/build
+# Copy built frontend from Stage 1
+COPY --from=frontend /app/public/dist ./public/dist
 
+# Install PHP dependencies
 RUN composer install --no-dev --optimize-autoloader
 
-RUN php artisan config:cache
-RUN php artisan route:cache
-RUN php artisan view:cache
+# Laravel setup
+RUN php artisan config:clear && \
+    php artisan route:clear && \
+    php artisan view:clear
 
-RUN chown -R www-data:www-data storage bootstrap/cache
-
-EXPOSE 80
-
-CMD ["apache2-foreground"]
+CMD ["php-fpm"]
